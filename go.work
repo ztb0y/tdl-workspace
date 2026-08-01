@@ -1,0 +1,8 @@
+go 1.25.8
+
+use (
+	./tdl
+	./tdl/core
+	./tdl/extension
+	./tdl-web
+)

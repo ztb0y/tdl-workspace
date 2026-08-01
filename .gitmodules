@@ -1,0 +1,12 @@
+[submodule "tdl"]
+	path = tdl
+	url = https://github.com/iyear/tdl.git
+	branch = master
+[submodule "tdl-web"]
+	path = tdl-web
+	url = https://github.com/ztb0y/tdl-web.git
+	branch = main
+[submodule "tdl-web-ui"]
+	path = tdl-web-ui
+	url = https://github.com/ztb0y/tdl-web-ui.git
+	branch = main

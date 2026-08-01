@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: ${{ github.workspace }}/go.work
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.8
+      - run: go test ./tdl-web/...
+      - run: go build -o bin/tdl ./tdl
+      - run: go build -o bin/tdl-web ./tdl-web
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tdl-web-ui
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tdl-web-ui/package-lock.json
+      - run: npm ci
+      - run: node --test test/*.test.ts
+      - run: npm run build
