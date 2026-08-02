@@ -1,0 +1,105 @@
+import { Button, ProgressIndicator, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component LauncherWindow inherits Window {
+    title: "tdl-web";
+    width: 720px;
+    height: 520px;
+    background: #111827;
+
+    in-out property <string> version-text: "组合版本 0.1.0";
+    in-out property <string> status-text: "正在初始化";
+    in-out property <string> api-origin: "API 尚未启动";
+    in-out property <string> ui-origin: "UI 尚未启动";
+    in-out property <string> update-text: "尚未检查更新";
+    in-out property <string> log-text: "";
+    in-out property <bool> running: false;
+    in-out property <bool> update-ready: false;
+
+    callback start-service();
+    callback stop-service();
+    callback open-web();
+    callback check-update();
+    callback install-update();
+
+    VerticalBox {
+        padding: 24px;
+        spacing: 14px;
+        Text { text: "tdl-web Launcher"; color: #f9fafb; font-size: 28px; font-weight: 700; }
+        Text { text: root.version-text; color: #9ca3af; }
+        Rectangle { height: 1px; background: #374151; }
+        Text { text: root.status-text; color: #34d399; font-size: 18px; }
+        Text { text: root.api-origin; color: #d1d5db; }
+        Text { text: root.ui-origin; color: #d1d5db; }
+        Text { text: root.update-text; color: #fbbf24; }
+        HorizontalBox {
+            spacing: 10px;
+            Button { text: root.running ? "运行中" : "启动"; enabled: !root.running; clicked => { root.start-service(); } }
+            Button { text: "停止"; enabled: root.running; clicked => { root.stop-service(); } }
+            Button { text: "打开网页"; enabled: root.running; clicked => { root.open-web(); } }
+            Button { text: "检查更新"; clicked => { root.check-update(); } }
+            Button { text: "安装更新"; enabled: root.update-ready; clicked => { root.install-update(); } }
+        }
+        Rectangle { height: 1px; background: #374151; }
+        Text { text: "运行日志"; color: #f9fafb; font-weight: 600; }
+        ScrollView {
+            Rectangle {
+                background: #030712;
+                Text {
+                    x: 10px;
+                    y: 10px;
+                    width: parent.width - 20px;
+                    text: root.log-text;
+                    color: #d1d5db;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+export component SetupWindow inherits Window {
+    title: "安装 tdl-web";
+    width: 560px;
+    height: 330px;
+    background: #111827;
+
+    in-out property <string> status-text: "准备安装";
+    in-out property <float> progress: 0;
+    in-out property <bool> busy: false;
+    in-out property <bool> finished: false;
+    callback install();
+    callback launch();
+
+    VerticalBox {
+        padding: 28px;
+        spacing: 18px;
+        Text { text: "tdl-web"; color: #f9fafb; font-size: 30px; font-weight: 700; }
+        Text { text: "离线安装器 · 当前用户"; color: #9ca3af; }
+        Text { text: root.status-text; color: #d1d5db; wrap: word-wrap; }
+        ProgressIndicator { progress: root.progress; }
+        HorizontalBox {
+            spacing: 12px;
+            Button { text: "安装"; enabled: !root.busy && !root.finished; clicked => { root.install(); } }
+            Button { text: "启动"; enabled: root.finished; clicked => { root.launch(); } }
+        }
+    }
+}
+
+export component UninstallWindow inherits Window {
+    title: "卸载 tdl-web";
+    width: 520px;
+    height: 280px;
+    background: #111827;
+
+    in-out property <string> status-text: "账号数据不会被删除。";
+    in-out property <bool> busy: false;
+    callback uninstall();
+
+    VerticalBox {
+        padding: 28px;
+        spacing: 18px;
+        Text { text: "卸载 tdl-web"; color: #f9fafb; font-size: 28px; font-weight: 700; }
+        Text { text: root.status-text; color: #d1d5db; wrap: word-wrap; }
+        Button { text: "确认卸载"; enabled: !root.busy; clicked => { root.uninstall(); } }
+    }
+}

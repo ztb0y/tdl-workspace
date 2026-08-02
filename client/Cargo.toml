@@ -1,0 +1,63 @@
+[package]
+name = "tdl-web-client"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[features]
+bundled-setup = []
+
+[dependencies]
+anyhow = "1.0"
+hex = "0.4"
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.0"
+slint = "=1.17.1"
+tiny_http = "0.12.0"
+ureq = "3.3.0"
+uuid = { version = "1.24.0", features = ["v4"] }
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+] }
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.56.0"
+
+[build-dependencies]
+slint-build = "=1.17.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+codegen-units = 1
+debug = 0
+lto = "thin"
+panic = "abort"
+strip = "symbols"
+
+[[bin]]
+name = "tdl-web-launcher"
+path = "src/bin/launcher.rs"
+
+[[bin]]
+name = "tdl-web-uninstaller"
+path = "src/bin/uninstaller.rs"
+
+[[bin]]
+name = "tdl-web-setup"
+path = "src/bin/setup.rs"
+required-features = ["bundled-setup"]
