@@ -1,0 +1,63 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.8
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tdl-web-ui/package-lock.json
+      - name: Resolve release version
+        shell: powershell
+        run: |
+          $metadata = cargo metadata --manifest-path .\client\Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          $version = $metadata.packages[0].version
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match client version $version"
+          }
+          "TDL_WEB_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build offline setup
+        shell: powershell
+        run: .\scripts\build-client.ps1 -Version $env:TDL_WEB_VERSION -RequireOfficialTdl
+      - name: Validate release assets
+        shell: powershell
+        run: |
+          $manifest = Get-Content .\bin\release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $env:TDL_WEB_VERSION) {
+            throw "Release manifest version mismatch"
+          }
+          $setup = Get-Item .\bin\tdl-web-setup-windows-x64.exe
+          $sha = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($setup.Length -ne $manifest.setup.size -or $sha -ne $manifest.setup.sha256) {
+            throw "Setup metadata mismatch"
+          }
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:TDL_WEB_VERSION"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag .\bin\tdl-web-setup-windows-x64.exe .\bin\release-manifest.json --clobber
+          } else {
+            gh release create $tag .\bin\tdl-web-setup-windows-x64.exe .\bin\release-manifest.json --target $env:GITHUB_SHA --generate-notes --title "tdl-web $tag"
+          }

@@ -22,6 +22,7 @@ jobs:
         with:
           go-version: 1.25.8
       - run: go test ./tdl-web/...
+      - run: mkdir -p bin
       - run: go build -o bin/tdl ./tdl
       - run: go build -o bin/tdl-web ./tdl-web
   ui:
@@ -41,3 +42,43 @@ jobs:
       - run: npm ci
       - run: node --test test/*.test.ts
       - run: npm run build
+  windows-client:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.8
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tdl-web-ui/package-lock.json
+      - name: Build and verify offline client
+        shell: powershell
+        run: |
+          $metadata = cargo metadata --manifest-path .\client\Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          .\scripts\build-client.ps1 -Version $metadata.packages[0].version -RequireOfficialTdl
+      - name: Verify release manifest gitlinks
+        shell: powershell
+        run: |
+          $manifest = Get-Content .\bin\release-manifest.json -Raw | ConvertFrom-Json
+          $expected = @{
+            "tdl" = (git -C tdl rev-parse HEAD).Trim()
+            "tdl-web" = (git -C tdl-web rev-parse HEAD).Trim()
+            "tdl-web-ui" = (git -C tdl-web-ui rev-parse HEAD).Trim()
+            "launcher" = (git rev-parse HEAD).Trim()
+            "uninstaller" = (git rev-parse HEAD).Trim()
+          }
+          foreach ($component in $manifest.components) {
+            if ($component.commit -ne $expected[$component.name]) {
+              throw "Commit mismatch for $($component.path)"
+            }
+          }
+          $bytes = [IO.File]::ReadAllBytes(".\bin\release-manifest.json")
+          if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) {
+            throw "release-manifest.json must not contain a UTF-8 BOM"
+          }
