@@ -7,6 +7,16 @@ pub fn install_root() -> Result<PathBuf> {
     if let Some(path) = env::var_os("TDL_WEB_INSTALL_ROOT") {
         return Ok(PathBuf::from(path));
     }
+    if let Ok(executable) = env::current_exe()
+        && let Some(root) = executable.parent()
+        && root.join("components.json").is_file()
+    {
+        return Ok(root.to_path_buf());
+    }
+    default_install_root()
+}
+
+pub fn default_install_root() -> Result<PathBuf> {
     let local = env::var_os("LOCALAPPDATA").context("LOCALAPPDATA is not set")?;
     Ok(PathBuf::from(local).join("Programs").join("tdl-web"))
 }

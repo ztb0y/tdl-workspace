@@ -1,10 +1,125 @@
-import { Button, ProgressIndicator, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { TextEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+component PatternBackground inherits Image {
+    width: 100%;
+    height: 100%;
+    source: @image-url("../../tdl-web-ui/public/telegram-pattern.svg");
+    colorize: #ffffff;
+    opacity: 0.08;
+    image-fit: cover;
+    accessible-role: none;
+}
+
+component DarkButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 48px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.enabled ? #404040 : #292929;
+    background: !root.enabled ? #191919 : button-area.pressed ? #3a3a3a : button-area.has-hover ? #2d2d2d : #232323;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.enabled ? #ffffff : #777777;
+        font-size: 16px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component WindowSurface inherits Rectangle {
+    x: 0;
+    y: 0;
+    width: 100%;
+    height: 100%;
+    background: #111111;
+
+    PatternBackground { }
+}
+
+component SimulatedTitleBar inherits Rectangle {
+    callback drag-window();
+    callback minimize-window();
+    callback close-window();
+
+    x: 0;
+    y: 0;
+    width: 100%;
+    height: 48px;
+    background: transparent;
+
+    drag-area := TouchArea {
+        width: parent.width - 96px;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.drag-window();
+            }
+        }
+    }
+
+    Rectangle {
+        x: parent.width - 96px;
+        width: 48px;
+        height: parent.height;
+        background: minimize-area.pressed ? #3a3a3a : minimize-area.has-hover ? #2c2c2c : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "−";
+            color: #eeeeee;
+            font-size: 22px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        minimize-area := TouchArea {
+            clicked => { root.minimize-window(); }
+        }
+    }
+
+    Rectangle {
+        x: parent.width - 48px;
+        width: 48px;
+        height: parent.height;
+        background: close-area.pressed ? #b52026 : close-area.has-hover ? #d13438 : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "×";
+            color: #ffffff;
+            font-size: 22px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        close-area := TouchArea {
+            clicked => { root.close-window(); }
+        }
+    }
+}
 
 export component LauncherWindow inherits Window {
     title: "tdl-web";
-    width: 720px;
-    height: 520px;
-    background: #111827;
+    width: 760px;
+    height: 560px;
+    no-frame: true;
+    resize-border-width: 0px;
+    background: #111111;
+    icon: @image-url("telegram-app-icon.svg");
 
     in-out property <string> version-text: "组合版本 0.1.0";
     in-out property <string> status-text: "正在初始化";
@@ -20,86 +135,382 @@ export component LauncherWindow inherits Window {
     callback open-web();
     callback check-update();
     callback install-update();
+    callback drag-window();
+    callback minimize-window();
+    callback close-window();
+
+    WindowSurface { }
 
     VerticalBox {
-        padding: 24px;
-        spacing: 14px;
-        Text { text: "tdl-web Launcher"; color: #f9fafb; font-size: 28px; font-weight: 700; }
-        Text { text: root.version-text; color: #9ca3af; }
-        Rectangle { height: 1px; background: #374151; }
-        Text { text: root.status-text; color: #34d399; font-size: 18px; }
-        Text { text: root.api-origin; color: #d1d5db; }
-        Text { text: root.ui-origin; color: #d1d5db; }
-        Text { text: root.update-text; color: #fbbf24; }
+        x: 32px;
+        y: 72px;
+        width: parent.width - 64px;
+        height: parent.height - 96px;
+        spacing: 12px;
+
         HorizontalBox {
-            spacing: 10px;
-            Button { text: root.running ? "运行中" : "启动"; enabled: !root.running; clicked => { root.start-service(); } }
-            Button { text: "停止"; enabled: root.running; clicked => { root.stop-service(); } }
-            Button { text: "打开网页"; enabled: root.running; clicked => { root.open-web(); } }
-            Button { text: "检查更新"; clicked => { root.check-update(); } }
-            Button { text: "安装更新"; enabled: root.update-ready; clicked => { root.install-update(); } }
+            height: 54px;
+            spacing: 14px;
+
+            Image {
+                width: 44px;
+                height: 44px;
+                source: @image-url("telegram-logo.svg");
+                colorize: #ffffff;
+            }
+
+            VerticalBox {
+                spacing: 2px;
+                Text { text: "tdl-web"; color: #ffffff; font-size: 24px; font-weight: 700; }
+                Text { text: root.version-text; color: #9b9b9b; font-size: 13px; }
+            }
         }
-        Rectangle { height: 1px; background: #374151; }
-        Text { text: "运行日志"; color: #f9fafb; font-weight: 600; }
-        ScrollView {
-            Rectangle {
-                background: #030712;
-                Text {
-                    x: 10px;
-                    y: 10px;
-                    width: parent.width - 20px;
-                    text: root.log-text;
-                    color: #d1d5db;
-                    wrap: word-wrap;
-                }
+
+        Rectangle { height: 1px; background: #343434; }
+        Text { text: root.status-text; color: #ffffff; font-size: 17px; }
+        Text { text: root.api-origin; color: #c2c2c2; font-size: 14px; }
+        Text { text: root.ui-origin; color: #c2c2c2; font-size: 14px; }
+        Text { text: root.update-text; color: #c2c2c2; font-size: 14px; }
+
+        HorizontalBox {
+            height: 48px;
+            spacing: 8px;
+            DarkButton { width: 128px; text: root.running ? "运行中" : "启动"; enabled: !root.running; clicked => { root.start-service(); } }
+            DarkButton { width: 128px; text: "停止"; enabled: root.running; clicked => { root.stop-service(); } }
+            DarkButton { width: 128px; text: "打开网页"; enabled: root.running; clicked => { root.open-web(); } }
+            DarkButton { width: 128px; text: "检查更新"; clicked => { root.check-update(); } }
+            DarkButton { width: 128px; text: "安装更新"; enabled: root.update-ready; clicked => { root.install-update(); } }
+        }
+
+        Rectangle { height: 1px; background: #343434; }
+        Text { text: "运行日志"; color: #f5f5f5; font-weight: 600; }
+        Rectangle {
+            background: #191919;
+            border-width: 1px;
+            border-color: #303030;
+
+            TextEdit {
+                width: parent.width;
+                height: parent.height;
+                text: root.log-text;
+                read-only: true;
+                wrap: word-wrap;
+                font-size: 14px;
             }
         }
     }
+
+    SimulatedTitleBar {
+        drag-window => { root.drag-window(); }
+        minimize-window => { root.minimize-window(); }
+        close-window => { root.close-window(); }
+    }
+
 }
 
 export component SetupWindow inherits Window {
     title: "安装 tdl-web";
-    width: 560px;
-    height: 330px;
-    background: #111827;
+    width: 800px;
+    height: 640px;
+    no-frame: true;
+    resize-border-width: 0px;
+    background: #111111;
+    icon: @image-url("telegram-app-icon.svg");
 
-    in-out property <string> status-text: "准备安装";
+    in-out property <string> version-text: "";
+    in-out property <string> install-path: "";
+    in-out property <string> status-text: "";
     in-out property <float> progress: 0;
+    in-out property <bool> custom-install: true;
     in-out property <bool> busy: false;
     in-out property <bool> finished: false;
+    in-out property <bool> failed: false;
+    callback choose-install-location();
     callback install();
     callback launch();
+    callback drag-window();
+    callback minimize-window();
+    callback close-window();
 
-    VerticalBox {
-        padding: 28px;
-        spacing: 18px;
-        Text { text: "tdl-web"; color: #f9fafb; font-size: 30px; font-weight: 700; }
-        Text { text: "离线安装器 · 当前用户"; color: #9ca3af; }
-        Text { text: root.status-text; color: #d1d5db; wrap: word-wrap; }
-        ProgressIndicator { progress: root.progress; }
-        HorizontalBox {
-            spacing: 12px;
-            Button { text: "安装"; enabled: !root.busy && !root.finished; clicked => { root.install(); } }
-            Button { text: "启动"; enabled: root.finished; clicked => { root.launch(); } }
+    WindowSurface { }
+
+    Rectangle {
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+
+        Image {
+            x: parent.width / 2 - 44px;
+            y: (parent.height - 358px) / 2;
+            width: 88px;
+            height: 88px;
+            source: @image-url("telegram-logo.svg");
+            colorize: #ffffff;
+        }
+
+        Text {
+            y: (parent.height - 358px) / 2 + 102px;
+            width: parent.width;
+            text: "tdl-web";
+            color: #ffffff;
+            font-size: 34px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        if root.custom-install: Rectangle {
+            x: 100px;
+            y: (parent.height - 358px) / 2 + 170px;
+            width: parent.width - 200px;
+            height: 62px;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: #393939;
+            background: #202020;
+
+            Text {
+                x: 18px;
+                width: 94px;
+                height: parent.height;
+                text: "安装位置";
+                color: #aaaaaa;
+                font-size: 16px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: 116px;
+                width: parent.width - 178px;
+                height: parent.height;
+                text: root.install-path;
+                color: #ffffff;
+                font-size: 16px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Rectangle {
+                x: parent.width - 62px;
+                width: 62px;
+                height: parent.height;
+                background: folder-area.has-hover ? #2c2c2c : transparent;
+
+                Rectangle {
+                    x: 18px;
+                    y: 20px;
+                    width: 26px;
+                    height: 18px;
+                    border-radius: 3px;
+                    background: #d7d7d7;
+                }
+
+                Rectangle {
+                    x: 18px;
+                    y: 17px;
+                    width: 12px;
+                    height: 6px;
+                    border-radius: 2px;
+                    background: #d7d7d7;
+                }
+
+                folder-area := TouchArea {
+                    enabled: !root.busy && !root.finished;
+                    clicked => { root.choose-install-location(); }
+                }
+            }
+        }
+
+        if !root.finished: DarkButton {
+            x: 100px;
+            y: (parent.height - 358px) / 2 + (root.custom-install ? 248px : 170px);
+            width: parent.width - 200px;
+            height: 60px;
+            text: root.busy ? "正在安装" : "一键安装";
+            enabled: !root.busy;
+            clicked => { root.install(); }
+        }
+
+        if root.finished: DarkButton {
+            x: 100px;
+            y: (parent.height - 358px) / 2 + (root.custom-install ? 248px : 170px);
+            width: parent.width - 200px;
+            height: 60px;
+            text: "启动";
+            clicked => { root.launch(); }
+        }
+
+        if root.busy || root.finished || root.failed: Text {
+            x: 100px;
+            y: (parent.height - 358px) / 2 + (root.custom-install ? 326px : 248px);
+            width: parent.width - 200px;
+            text: root.status-text;
+            color: root.failed ? #f2a4a4 : #c9c9c9;
+            font-size: 14px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        if root.busy || root.finished: Rectangle {
+            x: 100px;
+            y: (parent.height - 358px) / 2 + (root.custom-install ? 354px : 276px);
+            width: parent.width - 200px;
+            height: 4px;
+            background: #343434;
+            Rectangle {
+                width: parent.width * root.progress;
+                height: parent.height;
+                background: #ffffff;
+            }
+        }
+
+        Text {
+            x: 16px;
+            y: parent.height - 44px;
+            width: 240px;
+            height: 28px;
+            text: "版本 " + root.version-text;
+            color: #a5a5a5;
+            font-size: 15px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            x: parent.width - 158px;
+            y: parent.height - 44px;
+            width: 142px;
+            height: 28px;
+            background: custom-area.has-hover ? #1e1e1e : transparent;
+            border-radius: 4px;
+
+            Rectangle {
+                x: 2px;
+                y: 3px;
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                border-width: 1px;
+                border-color: root.custom-install ? #ffffff : #777777;
+                background: root.custom-install ? #ffffff : transparent;
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.custom-install ? "✓" : "";
+                    color: #171717;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                x: 36px;
+                width: parent.width - 36px;
+                height: parent.height;
+                text: "自定义安装";
+                color: #d1d1d1;
+                font-size: 15px;
+                vertical-alignment: center;
+            }
+
+            custom-area := TouchArea {
+                enabled: !root.busy && !root.finished;
+                clicked => { root.custom-install = !root.custom-install; }
+            }
         }
     }
+
+    SimulatedTitleBar {
+        drag-window => { root.drag-window(); }
+        minimize-window => { root.minimize-window(); }
+        close-window => { root.close-window(); }
+
+    }
+
 }
 
 export component UninstallWindow inherits Window {
     title: "卸载 tdl-web";
-    width: 520px;
-    height: 280px;
-    background: #111827;
+    width: 720px;
+    height: 500px;
+    no-frame: true;
+    resize-border-width: 0px;
+    background: #111111;
+    icon: @image-url("telegram-app-icon.svg");
 
+    in-out property <string> version-text: "";
     in-out property <string> status-text: "账号数据不会被删除。";
     in-out property <bool> busy: false;
     callback uninstall();
+    callback drag-window();
+    callback minimize-window();
+    callback close-window();
 
-    VerticalBox {
-        padding: 28px;
-        spacing: 18px;
-        Text { text: "卸载 tdl-web"; color: #f9fafb; font-size: 28px; font-weight: 700; }
-        Text { text: root.status-text; color: #d1d5db; wrap: word-wrap; }
-        Button { text: "确认卸载"; enabled: !root.busy; clicked => { root.uninstall(); } }
+    WindowSurface { }
+
+    Rectangle {
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+
+        Image {
+            x: parent.width / 2 - 40px;
+            y: (parent.height - 294px) / 2;
+            width: 80px;
+            height: 80px;
+            source: @image-url("telegram-logo.svg");
+            colorize: #ffffff;
+        }
+
+        Text {
+            y: (parent.height - 294px) / 2 + 96px;
+            width: parent.width;
+            text: "卸载 tdl-web";
+            color: #ffffff;
+            font-size: 30px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            x: 90px;
+            y: (parent.height - 294px) / 2 + 156px;
+            width: parent.width - 180px;
+            text: root.status-text;
+            color: #bcbcbc;
+            font-size: 16px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+
+        DarkButton {
+            x: 90px;
+            y: (parent.height - 294px) / 2 + 238px;
+            width: parent.width - 180px;
+            height: 56px;
+            text: root.busy ? "正在卸载" : "确认卸载";
+            enabled: !root.busy;
+            clicked => { root.uninstall(); }
+        }
+
+        Text {
+            x: 16px;
+            y: parent.height - 40px;
+            width: parent.width - 32px;
+            height: 24px;
+            text: root.version-text;
+            color: #919191;
+            font-size: 14px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
+
+    SimulatedTitleBar {
+        drag-window => { root.drag-window(); }
+        minimize-window => { root.minimize-window(); }
+        close-window => { root.close-window(); }
+
+    }
+
 }

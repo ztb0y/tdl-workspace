@@ -23,7 +23,10 @@ mod app {
         APP_VERSION, SetupWindow,
         manifest::{ComponentsManifest, verify_components},
         paths,
-        windows::{register_install, replace_file, wait_for_pid},
+        windows::{
+            center_window, choose_install_folder, configure_native_window, drag_window,
+            minimize_window, register_install, replace_file, wait_for_pid,
+        },
     };
     use uuid::Uuid;
     use zip::ZipArchive;
@@ -48,6 +51,11 @@ mod app {
     pub fn run() -> Result<()> {
         let args: Vec<String> = std::env::args().collect();
         let update = args.iter().any(|arg| arg == "--update");
+        let install_root =
+            argument_value(&args, "--install-root")?.unwrap_or(paths::default_install_root()?);
+        if !install_root.is_absolute() {
+            anyhow::bail!("install root must be an absolute path");
+        }
         if let Some(index) = args.iter().position(|arg| arg == "--wait-pid") {
             let pid = args
                 .get(index + 1)
@@ -57,20 +65,75 @@ mod app {
         }
 
         let ui = SetupWindow::new()?;
+        ui.set_version_text(APP_VERSION.into());
+        ui.set_install_path(install_root.display().to_string().into());
+        {
+            let weak = ui.as_weak();
+            ui.on_drag_window(move || {
+                if let Some(ui) = weak.upgrade() {
+                    drag_window(ui.window());
+                }
+            });
+        }
+        {
+            let weak = ui.as_weak();
+            ui.on_minimize_window(move || {
+                if let Some(ui) = weak.upgrade() {
+                    minimize_window(ui.window());
+                }
+            });
+        }
+        ui.on_close_window(|| {
+            let _ = slint::quit_event_loop();
+        });
         if update {
             ui.set_status_text("准备更新已安装的组合版本".into());
         }
         let (tx, rx) = mpsc::channel();
         {
             let tx = tx.clone();
-            ui.on_install(move || install_async(tx.clone()));
+            let weak = ui.as_weak();
+            ui.on_install(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                install_async(tx.clone(), PathBuf::from(ui.get_install_path().to_string()));
+            });
         }
-        ui.on_launch(move || {
-            if let Ok(root) = paths::install_root() {
+        {
+            let weak = ui.as_weak();
+            ui.on_choose_install_location(move || match choose_install_folder() {
+                Ok(Some(path)) => {
+                    let Some(ui) = weak.upgrade() else { return };
+                    ui.set_install_path(path.display().to_string().into());
+                    ui.set_failed(false);
+                    ui.set_status_text("".into());
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let Some(ui) = weak.upgrade() else { return };
+                    ui.set_status_text(format!("选择安装位置失败：{error:#}").into());
+                    ui.set_failed(true);
+                }
+            });
+        }
+        {
+            let weak = ui.as_weak();
+            ui.on_launch(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let root = PathBuf::from(ui.get_install_path().to_string());
                 let _ = Command::new(root.join("tdl-web-launcher.exe")).spawn();
-            }
-            let _ = slint::quit_event_loop();
-        });
+                let _ = slint::quit_event_loop();
+            });
+        }
+
+        {
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(100), move || {
+                if let Some(ui) = weak.upgrade() {
+                    configure_native_window(ui.window());
+                    center_window(ui.window());
+                }
+            });
+        }
 
         let weak = ui.as_weak();
         let timer = slint::Timer::default();
@@ -85,16 +148,19 @@ mod app {
                             ui.set_status_text(text.into());
                             ui.set_progress(progress);
                             ui.set_busy(true);
+                            ui.set_failed(false);
                         }
                         Event::Finished => {
                             ui.set_status_text("安装完成，账号数据保持不变。".into());
                             ui.set_progress(1.0);
                             ui.set_busy(false);
                             ui.set_finished(true);
+                            ui.set_failed(false);
                         }
                         Event::Failed(error) => {
                             ui.set_status_text(format!("安装失败：{error}").into());
                             ui.set_busy(false);
+                            ui.set_failed(true);
                         }
                     }
                 }
@@ -102,26 +168,36 @@ mod app {
         );
 
         if update {
-            install_async(tx);
+            install_async(tx, install_root);
         }
         ui.run()?;
         Ok(())
     }
 
-    fn install_async(tx: mpsc::Sender<Event>) {
+    fn argument_value(args: &[String], name: &str) -> Result<Option<PathBuf>> {
+        let Some(index) = args.iter().position(|argument| argument == name) else {
+            return Ok(None);
+        };
+        Ok(Some(PathBuf::from(
+            args.get(index + 1)
+                .with_context(|| format!("missing {name} value"))?,
+        )))
+    }
+
+    fn install_async(tx: mpsc::Sender<Event>, root: PathBuf) {
         thread::spawn(move || {
-            if let Err(error) = install(&tx) {
+            if let Err(error) = install(&tx, &root) {
                 tx.send(Event::Failed(format!("{error:#}"))).ok();
             }
         });
     }
 
-    fn install(tx: &mpsc::Sender<Event>) -> Result<()> {
+    fn install(tx: &mpsc::Sender<Event>, root: &Path) -> Result<()> {
         let log_path = paths::app_data_root()?.join("logs").join("setup.log");
         fs::create_dir_all(log_path.parent().context("setup log has no parent")?)?;
         let mut log = File::create(&log_path).context("create setup log")?;
         write_log(&mut log, &format!("tdl-web setup {APP_VERSION} started"))?;
-        match install_logged(tx, &mut log) {
+        match install_logged(tx, root, &mut log) {
             Ok(()) => {
                 write_log(&mut log, "installation completed")?;
                 Ok(())
@@ -133,9 +209,8 @@ mod app {
         }
     }
 
-    fn install_logged(tx: &mpsc::Sender<Event>, log: &mut File) -> Result<()> {
+    fn install_logged(tx: &mpsc::Sender<Event>, root: &Path, log: &mut File) -> Result<()> {
         tx.send(Event::Status("正在解压离线组件".into(), 0.15)).ok();
-        let root = paths::install_root()?;
         let parent = root.parent().context("install root has no parent")?;
         fs::create_dir_all(parent)?;
         let staging = CleanupDir(parent.join(format!("tdl-web.installing-{}", Uuid::new_v4())));

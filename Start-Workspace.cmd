@@ -1,6 +1,6 @@
 @echo off
 setlocal
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-workspace.ps1"
+node.exe "%~dp0scripts\start-workspace.mjs"
 set "exitCode=%ERRORLEVEL%"
 if not "%exitCode%"=="0" pause
 exit /b %exitCode%

@@ -30,7 +30,10 @@ mod app {
         ready::ReadyState,
         static_server::StaticServer,
         update,
-        windows::{Job, SingleInstance, open_browser},
+        windows::{
+            Job, SingleInstance, center_window, configure_native_window, drag_window,
+            minimize_window, open_browser, system_proxy,
+        },
     };
 
     struct Services {
@@ -76,6 +79,36 @@ mod app {
         let _instance = SingleInstance::acquire("Local\\ztb0y.tdl-web.launcher")?;
         let ui = LauncherWindow::new()?;
         ui.set_version_text(format!("组合版本 {APP_VERSION}").into());
+
+        {
+            let weak = ui.as_weak();
+            ui.on_drag_window(move || {
+                if let Some(ui) = weak.upgrade() {
+                    drag_window(ui.window());
+                }
+            });
+        }
+        {
+            let weak = ui.as_weak();
+            ui.on_minimize_window(move || {
+                if let Some(ui) = weak.upgrade() {
+                    minimize_window(ui.window());
+                }
+            });
+        }
+        ui.on_close_window(|| {
+            let _ = slint::quit_event_loop();
+        });
+
+        {
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(100), move || {
+                if let Some(ui) = weak.upgrade() {
+                    configure_native_window(ui.window());
+                    center_window(ui.window());
+                }
+            });
+        }
 
         let state = Arc::new(LauncherState::default());
         let (events_tx, events_rx) = mpsc::channel();
@@ -247,15 +280,24 @@ mod app {
         let log_dir = paths::app_data_root()?.join("logs");
         fs::create_dir_all(&log_dir)?;
         let log_file = log_dir.join("latest.log");
-        let mut child = Command::new(&tdl)
+        let mut command = Command::new(&tdl);
+        command
             .arg("web")
             .current_dir(paths::downloads_dir()?)
             .env("TDL_WEB_ADDR", "127.0.0.1:0")
             .env("TDL_WEB_READY_FILE", &ready_file)
+            .env("TDL_WEB_TAKEOUT", "1")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("start tdl web")?;
+            .stderr(Stdio::piped());
+        tx.send(UiEvent::Log("已启用 Telegram Takeout 会话".into()))
+            .ok();
+        if std::env::var_os("TDL_PROXY").is_none()
+            && let Some(proxy) = system_proxy()
+        {
+            command.env("TDL_PROXY", proxy);
+            tx.send(UiEvent::Log("已使用 Windows 系统代理".into())).ok();
+        }
+        let mut child = command.spawn().context("start tdl web")?;
         let job = Job::new()?;
         job.assign(&child)?;
         if let Some(stdout) = child.stdout.take() {
@@ -352,12 +394,30 @@ mod app {
         thread::spawn(move || {
             let mut file = OpenOptions::new().create(true).append(true).open(path).ok();
             for line in BufReader::new(reader).lines().map_while(Result::ok) {
+                let line = strip_ansi(&line);
                 if let Some(file) = file.as_mut() {
                     let _ = writeln!(file, "{line}");
                 }
                 tx.send(UiEvent::Log(line)).ok();
             }
         });
+    }
+
+    fn strip_ansi(value: &str) -> String {
+        let mut result = String::with_capacity(value.len());
+        let mut characters = value.chars().peekable();
+        while let Some(character) = characters.next() {
+            if character == '\u{1b}' && characters.next_if_eq(&'[').is_some() {
+                for character in characters.by_ref() {
+                    if ('@'..='~').contains(&character) {
+                        break;
+                    }
+                }
+            } else {
+                result.push(character);
+            }
+        }
+        result
     }
 
     fn check_update_async(state: Arc<LauncherState>, tx: mpsc::Sender<UiEvent>) {
@@ -408,9 +468,18 @@ mod app {
             .and_then(|mut update| update.take());
         let Some(update) = update else { return };
         stop_services(state, tx);
-        let result = Command::new(&update.setup)
-            .args(["--update", "--wait-pid", &std::process::id().to_string()])
-            .spawn();
+        let result = (|| -> Result<()> {
+            let root = paths::install_root()?;
+            Command::new(&update.setup)
+                .arg("--update")
+                .arg("--wait-pid")
+                .arg(std::process::id().to_string())
+                .arg("--install-root")
+                .arg(root)
+                .spawn()
+                .context("launch update setup")?;
+            Ok(())
+        })();
         match result {
             Ok(_) => {
                 tx.send(UiEvent::Log(format!(
@@ -424,6 +493,16 @@ mod app {
                 tx.send(UiEvent::Log(format!("启动更新安装器失败：{error}")))
                     .ok();
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::strip_ansi;
+
+        #[test]
+        fn strips_ansi_sequences_from_log_lines() {
+            assert_eq!(strip_ansi("\u{1b}[32mready\u{1b}[0m"), "ready");
         }
     }
 }

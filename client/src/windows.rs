@@ -19,15 +19,28 @@ use ::windows::{
             CoTaskMemFree, CoUninitialize, IPersistFile,
         },
         UI::Shell::{
-            FOLDERID_Desktop, FOLDERID_Programs, IShellLinkW, KF_FLAG_DEFAULT,
-            SHGetKnownFolderPath, ShellLink,
+            BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, FOLDERID_Desktop,
+            FOLDERID_Programs, IShellLinkW, KF_FLAG_DEFAULT, SHBrowseForFolderW,
+            SHGetKnownFolderPath, SHGetPathFromIDListW, ShellLink,
         },
     },
     core::{GUID, Interface, PCWSTR},
 };
 use anyhow::{Context, Result, bail};
+use slint::winit_030::{
+    WinitWindowAccessor,
+    winit::{
+        dpi::PhysicalPosition,
+        platform::windows::{CornerPreference, WindowExtWindows},
+        raw_window_handle::{HasWindowHandle, RawWindowHandle},
+    },
+};
 use windows_sys::Win32::{
     Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, WAIT_TIMEOUT},
+    Graphics::{
+        Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
+        Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow},
+    },
     Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW},
     System::{
         JobObjects::{
@@ -126,6 +139,167 @@ pub fn open_browser(url: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn configure_native_window(window: &slint::Window) {
+    let _ = window.with_winit_window(|native_window| {
+        native_window.set_undecorated_shadow(true);
+        native_window.set_corner_preference(CornerPreference::Round);
+        if let Ok(handle) = native_window.window_handle()
+            && let RawWindowHandle::Win32(handle) = handle.as_raw()
+        {
+            let window = handle.hwnd.get() as HANDLE;
+            configure_dark_mode(window);
+        }
+    });
+}
+
+pub fn drag_window(window: &slint::Window) {
+    let _ = window.with_winit_window(|native_window| native_window.drag_window());
+}
+
+pub fn minimize_window(window: &slint::Window) {
+    let _ = window.with_winit_window(|native_window| native_window.set_minimized(true));
+}
+
+fn configure_dark_mode(window: HANDLE) {
+    let enabled: i32 = 1;
+    unsafe {
+        DwmSetWindowAttribute(
+            window,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            &enabled as *const i32 as *const _,
+            size_of::<i32>() as u32,
+        );
+    }
+}
+
+pub fn center_window(window: &slint::Window) {
+    let _ = window.with_winit_window(|native_window| {
+        let window_size = native_window.outer_size();
+        let work_area =
+            native_window
+                .window_handle()
+                .ok()
+                .and_then(|handle| match handle.as_raw() {
+                    RawWindowHandle::Win32(handle) => work_area(handle.hwnd.get() as HANDLE),
+                    _ => None,
+                });
+        let Some((x, y, width, height)) = work_area.or_else(|| {
+            native_window
+                .current_monitor()
+                .or_else(|| native_window.primary_monitor())
+                .map(|monitor| {
+                    let position = monitor.position();
+                    let size = monitor.size();
+                    (position.x, position.y, size.width, size.height)
+                })
+        }) else {
+            return;
+        };
+        let x = x + (width.saturating_sub(window_size.width) / 2) as i32;
+        let y = y + (height.saturating_sub(window_size.height) / 2) as i32;
+        native_window.set_outer_position(PhysicalPosition::new(x, y));
+    });
+}
+
+fn work_area(window: HANDLE) -> Option<(i32, i32, u32, u32)> {
+    let monitor = unsafe { MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return None;
+    }
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return None;
+    }
+    let area = info.rcWork;
+    Some((
+        area.left,
+        area.top,
+        (area.right - area.left).max(0) as u32,
+        (area.bottom - area.top).max(0) as u32,
+    ))
+}
+
+pub fn choose_install_folder() -> Result<Option<PathBuf>> {
+    let _com = Com::initialize()?;
+    let title = wide("选择安装位置");
+    let browse_info = BROWSEINFOW {
+        lpszTitle: PCWSTR(title.as_ptr()),
+        ulFlags: BIF_NEWDIALOGSTYLE | BIF_RETURNONLYFSDIRS,
+        ..Default::default()
+    };
+    let item_id_list = unsafe { SHBrowseForFolderW(&browse_info) };
+    if item_id_list.is_null() {
+        return Ok(None);
+    }
+    let mut path = [0_u16; 260];
+    let resolved = unsafe { SHGetPathFromIDListW(item_id_list, &mut path).as_bool() };
+    unsafe { CoTaskMemFree(Some(item_id_list.cast())) };
+    if !resolved {
+        bail!("resolve selected installation folder")
+    }
+    let length = path
+        .iter()
+        .position(|character| *character == 0)
+        .unwrap_or(path.len());
+    Ok(Some(PathBuf::from(OsString::from_wide(&path[..length]))))
+}
+
+pub fn system_proxy() -> Option<String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let settings = hkcu
+        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+        .ok()?;
+    if settings.get_value::<u32, _>("ProxyEnable").ok()? == 0 {
+        return None;
+    }
+    let proxy_server: String = settings.get_value("ProxyServer").ok()?;
+    proxy_url(&proxy_server)
+}
+
+fn proxy_url(proxy_server: &str) -> Option<String> {
+    for entry in proxy_server.split(';') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let (scheme, address) = entry.split_once('=').unwrap_or(("http", entry));
+        let address = address.trim();
+        if address.is_empty() {
+            continue;
+        }
+        if address.contains("://") {
+            return Some(address.to_owned());
+        }
+        let scheme = if scheme.eq_ignore_ascii_case("socks") {
+            "socks5"
+        } else {
+            scheme
+        };
+        return Some(format!("{scheme}://{address}"));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::proxy_url;
+
+    #[test]
+    fn normalizes_windows_proxy_servers() {
+        assert_eq!(
+            proxy_url("127.0.0.1:7890"),
+            Some("http://127.0.0.1:7890".into())
+        );
+        assert_eq!(
+            proxy_url("socks=127.0.0.1:1080"),
+            Some("socks5://127.0.0.1:1080".into())
+        );
+    }
+}
+
 pub fn wait_for_pid(pid: u32, timeout: Duration) -> Result<()> {
     use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
 
@@ -170,7 +344,14 @@ pub fn register_install(root: &Path, version: &str) -> Result<()> {
     key.set_value("Publisher", &"ztb0y")?;
     key.set_value("InstallLocation", &root.to_string_lossy().as_ref())?;
     key.set_value("DisplayIcon", &launcher.to_string_lossy().as_ref())?;
-    key.set_value("UninstallString", &format!("\"{}\"", uninstaller.display()))?;
+    key.set_value(
+        "UninstallString",
+        &format!(
+            "\"{}\" --root \"{}\"",
+            uninstaller.display(),
+            root.display()
+        ),
+    )?;
     key.set_value("NoModify", &1_u32)?;
     key.set_value("NoRepair", &1_u32)?;
     create_shortcuts(root)

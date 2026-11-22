@@ -14,7 +14,7 @@ semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
-slint = "=1.17.1"
+slint = { version = "=1.17.1", features = ["unstable-winit-030"] }
 tiny_http = "0.12.0"
 ureq = "3.3.0"
 uuid = { version = "1.24.0", features = ["v4"] }
@@ -25,18 +25,24 @@ windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_System_Com",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
 ] }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
   "Win32_Storage_FileSystem",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
+  "Win32_UI_Controls",
+  "Win32_UI_HiDpi",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56.0"
 
 [build-dependencies]
+resvg = "=0.47.0"
 slint-build = "=1.17.1"
 
 [dev-dependencies]
